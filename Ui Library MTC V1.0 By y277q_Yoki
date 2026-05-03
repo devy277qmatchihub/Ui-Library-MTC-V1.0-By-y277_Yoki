@@ -1,12 +1,3 @@
--- LocalLibrary (ModuleScript)
--- Supports:
--- Title empty by default
--- Left icon / Close icon
--- Themes: Dark, Red, Aqua, Light
--- Discord banner + link
--- Tabs, Sections, Buttons, Toggles, Sliders, Dropdowns, Notify
--- Icon support via ImageId or icon map (Lucide names -> ImageId)
-
 local Library = {}
 
 local Players = game:GetService("Players")
@@ -81,26 +72,39 @@ local function new(className, props)
 end
 
 local function corner(parent, radius)
-	return new("UICorner", {
+	local c = new("UICorner", {
 		CornerRadius = UDim.new(0, radius or 8),
 		Parent = parent
 	})
+	return c
 end
 
 local function stroke(parent, color, thickness, transparency)
-	return new("UIStroke", {
+	local s = new("UIStroke", {
 		Parent = parent,
 		Color = color,
 		Thickness = thickness or 1,
 		Transparency = transparency or 0
 	})
+	return s
+end
+
+local function safeOpenLink(link)
+	if not link or link == "" then return end
+	pcall(function()
+		if setclipboard then
+			setclipboard(link)
+		end
+	end)
+	pcall(function()
+		GuiService:OpenBrowserWindow(link)
+	end)
 end
 
 function Library:CreateWindow(cfg)
 	cfg = cfg or {}
 
 	local Theme = Themes[cfg.Theme or "Dark"] or Themes.Dark
-	local IconMap = cfg.IconMap or {}
 
 	local Gui = new("ScreenGui", {
 		Name = "LocalLibrary",
@@ -128,7 +132,6 @@ function Library:CreateWindow(cfg)
 		BorderSizePixel = 0
 	})
 	corner(TopBar, 10)
-	local TopStroke = stroke(TopBar, Theme.Stroke, 0, 1)
 
 	local TopMask = new("Frame", {
 		Parent = TopBar,
@@ -208,7 +211,7 @@ function Library:CreateWindow(cfg)
 		BorderSizePixel = 0,
 		Size = UDim2.new(0, 170, 1, 0)
 	})
-	local SideStroke = stroke(Sidebar, Theme.Stroke, 1)
+	local SidebarStroke = stroke(Sidebar, Theme.Stroke, 1)
 
 	local TabList = new("ScrollingFrame", {
 		Parent = Sidebar,
@@ -221,7 +224,7 @@ function Library:CreateWindow(cfg)
 		ScrollBarThickness = 4
 	})
 
-	local TabListLayout = new("UIListLayout", {
+	new("UIListLayout", {
 		Parent = TabList,
 		Padding = UDim.new(0, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder
@@ -240,6 +243,15 @@ function Library:CreateWindow(cfg)
 		Size = UDim2.new(1, -170, 1, 0)
 	})
 
+	local Pages = new("Frame", {
+		Parent = Right,
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 10, 0, 10),
+		Size = UDim2.new(1, -20, 1, -20)
+	})
+
+	local PagesFolder = new("Folder", { Parent = Pages })
+
 	local NotifyHolder = new("Frame", {
 		Parent = Gui,
 		BackgroundTransparency = 1,
@@ -254,8 +266,8 @@ function Library:CreateWindow(cfg)
 		Size = UDim2.new(1, -20, 0, 64),
 		Visible = false
 	})
-	local DiscordStroke = corner(DiscordBanner, 10)
-	local DiscordStrokeObj = stroke(DiscordBanner, Theme.Stroke, 1)
+	corner(DiscordBanner, 10)
+	local DiscordStroke = stroke(DiscordBanner, Theme.Stroke, 1)
 
 	local DiscordBannerImage = new("ImageLabel", {
 		Parent = DiscordBanner,
@@ -305,27 +317,12 @@ function Library:CreateWindow(cfg)
 	corner(DiscordButton, 8)
 	local DiscordButtonStroke = stroke(DiscordButton, Theme.Stroke, 1)
 
-	local Pages = new("Frame", {
-		Parent = Right,
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 10, 0, 82),
-		Size = UDim2.new(1, -20, 1, -92)
-	})
-
-	local PagesFolder = new("Folder", {
-		Parent = Pages
-	})
-
 	local Window = {}
 	Window._tabs = {}
-	Window._selectedTab = nil
-	Window._discordLink = nil
-	Window._theme = Theme
-	Window._iconMap = IconMap
-	Window._binds = {
+	Window._themeRefs = {
 		bg = {},
 		top = {},
-		side = {},
+		sidebar = {},
 		card = {},
 		button = {},
 		input = {},
@@ -335,84 +332,61 @@ function Library:CreateWindow(cfg)
 		fill = {},
 	}
 
-	local function bind(group, obj, prop)
-		table.insert(Window._binds[group], { obj = obj, prop = prop })
-	end
+	Window._discordLink = nil
 
-	local function resolveIcon(icon)
-		if not icon or icon == "" then
-			return ""
-		end
-		if string.sub(icon, 1, 12) == "rbxassetid://" then
-			return icon
-		end
-		if string.sub(icon, 1, 9) == "lucide://" then
-			local key = string.sub(icon, 10)
-			return Window._iconMap[key] or ""
-		end
-		return Window._iconMap[icon] or icon
-	end
-
-	function Window:RegisterIcon(name, imageId)
-		if not name or not imageId then return end
-		Window._iconMap[name] = imageId
+	local function track(group, obj, prop)
+		table.insert(Window._themeRefs[group], { obj = obj, prop = prop })
 	end
 
 	local function applyTheme(t)
-		Window._theme = t
-
-		for _, r in ipairs(Window._binds.bg) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.BG end
-		end
-		for _, r in ipairs(Window._binds.top) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Top end
-		end
-		for _, r in ipairs(Window._binds.side) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Sidebar end
-		end
-		for _, r in ipairs(Window._binds.card) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Card end
-		end
-		for _, r in ipairs(Window._binds.button) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Button end
-		end
-		for _, r in ipairs(Window._binds.input) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Input end
-		end
-		for _, r in ipairs(Window._binds.text) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Text end
-		end
-		for _, r in ipairs(Window._binds.sub) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.SubText end
-		end
-		for _, r in ipairs(Window._binds.stroke) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Stroke end
-		end
-		for _, r in ipairs(Window._binds.fill) do
-			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Fill end
-		end
+		Theme = t
 
 		Main.BackgroundColor3 = t.BG
-		MainStroke.Color = t.Stroke
-
 		TopBar.BackgroundColor3 = t.Top
-		TopStroke.Color = t.Stroke
 		TopMask.BackgroundColor3 = t.Top
-
 		Sidebar.BackgroundColor3 = t.Sidebar
-		SideStroke.Color = t.Stroke
-
+		MainStroke.Color = t.Stroke
+		SidebarStroke.Color = t.Stroke
 		Title.TextColor3 = t.Text
 		LeftIconText.TextColor3 = t.Text
 		CloseText.TextColor3 = t.Text
-
 		DiscordBanner.BackgroundColor3 = t.Card
-		DiscordStrokeObj.Color = t.Stroke
 		DiscordBannerTitle.TextColor3 = t.Text
 		DiscordBannerSub.TextColor3 = t.SubText
 		DiscordButton.BackgroundColor3 = t.Button
-		DiscordButtonStroke.Color = t.Stroke
 		DiscordButton.TextColor3 = t.Text
+		DiscordButtonStroke.Color = t.Stroke
+
+		for _, r in ipairs(Window._themeRefs.bg) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.BG end
+		end
+		for _, r in ipairs(Window._themeRefs.top) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Top end
+		end
+		for _, r in ipairs(Window._themeRefs.sidebar) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Sidebar end
+		end
+		for _, r in ipairs(Window._themeRefs.card) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Card end
+		end
+		for _, r in ipairs(Window._themeRefs.button) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Button end
+		end
+		for _, r in ipairs(Window._themeRefs.input) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Input end
+		end
+		for _, r in ipairs(Window._themeRefs.text) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Text end
+		end
+		for _, r in ipairs(Window._themeRefs.sub) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.SubText end
+		end
+		for _, r in ipairs(Window._themeRefs.stroke) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Stroke end
+		end
+		for _, r in ipairs(Window._themeRefs.fill) do
+			if r.obj and r.obj.Parent then r.obj[r.prop] = t.Fill end
+		end
 
 		for _, tab in pairs(Window._tabs) do
 			tab.Button.BackgroundColor3 = tab.Active and t.Accent or t.Button
@@ -424,16 +398,8 @@ function Library:CreateWindow(cfg)
 		end
 	end
 
-	local function openExternal(link)
-		if not link or link == "" then return end
-		pcall(function()
-			if setclipboard then
-				setclipboard(link)
-			end
-		end)
-		pcall(function()
-			GuiService:OpenBrowserWindow(link)
-		end)
+	local function playShow(obj, goal, time)
+		TweenService:Create(obj, TweenInfo.new(time or 0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goal):Play()
 	end
 
 	CloseText.MouseButton1Click:Connect(function()
@@ -446,16 +412,14 @@ function Library:CreateWindow(cfg)
 
 	DiscordButton.MouseButton1Click:Connect(function()
 		if Window._discordLink then
-			openExternal(Window._discordLink)
+			safeOpenLink(Window._discordLink)
 		end
 	end)
 
-	-- Drag window
+	-- drag
 	do
 		local dragging = false
-		local dragStart
-		local startPos
-		local dragInput
+		local dragStart, startPos, dragInput
 
 		TopBar.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -489,7 +453,7 @@ function Library:CreateWindow(cfg)
 		end)
 	end
 
-	local function makeSection(tabPage, titleText, sectionIcon)
+	local function makeSection(tabPage, titleText)
 		local Section = new("Frame", {
 			Parent = tabPage,
 			BackgroundColor3 = Theme.Card,
@@ -500,25 +464,11 @@ function Library:CreateWindow(cfg)
 		corner(Section, 10)
 		local SectionStroke = stroke(Section, Theme.Stroke, 1)
 
-		local Icon
-		local iconResolved = resolveIcon(sectionIcon)
-		if iconResolved ~= "" then
-			Icon = new("ImageLabel", {
-				Parent = Section,
-				BackgroundTransparency = 1,
-				Position = UDim2.new(0, 10, 0, 10),
-				Size = UDim2.new(0, 16, 0, 16),
-				Image = iconResolved,
-				ScaleType = Enum.ScaleType.Fit,
-				ImageColor3 = Theme.Text
-			})
-		end
-
 		local SectionTitle = new("TextLabel", {
 			Parent = Section,
 			BackgroundTransparency = 1,
 			Size = UDim2.new(1, -20, 0, 28),
-			Position = UDim2.new(0, Icon and 32 or 10, 0, 6),
+			Position = UDim2.new(0, 10, 0, 6),
 			Text = titleText or "Section",
 			TextColor3 = Theme.Text,
 			Font = Enum.Font.GothamBold,
@@ -534,7 +484,7 @@ function Library:CreateWindow(cfg)
 			AutomaticSize = Enum.AutomaticSize.Y
 		})
 
-		local Layout = new("UIListLayout", {
+		new("UIListLayout", {
 			Parent = Body,
 			Padding = UDim.new(0, 8),
 			SortOrder = Enum.SortOrder.LayoutOrder
@@ -545,12 +495,9 @@ function Library:CreateWindow(cfg)
 			PaddingBottom = UDim.new(0, 10)
 		})
 
-		bind("card", Section, "BackgroundColor3")
-		bind("stroke", SectionStroke, "Color")
-		bind("text", SectionTitle, "TextColor3")
-		if Icon then
-			bind("text", Icon, "ImageColor3")
-		end
+		track("card", Section, "BackgroundColor3")
+		track("stroke", SectionStroke, "Color")
+		track("text", SectionTitle, "TextColor3")
 
 		local SectionApi = {}
 
@@ -565,54 +512,28 @@ function Library:CreateWindow(cfg)
 				TextSize = 13,
 				TextXAlignment = Enum.TextXAlignment.Left
 			})
-			bind("text", Label, "TextColor3")
+			track("text", Label, "TextColor3")
 			return Label
 		end
 
-		function SectionApi:AddButton(text, callback, icon)
-			local Row = new("Frame", {
+		function SectionApi:AddButton(text, callback)
+			local Btn = new("TextButton", {
 				Parent = Body,
 				BackgroundColor3 = Theme.Button,
 				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 40)
-			})
-			corner(Row, 8)
-			local RowStroke = stroke(Row, Theme.Stroke, 1)
-
-			local iconResolved = resolveIcon(icon)
-			local IconLabel
-			local textX = 12
-			if iconResolved ~= "" then
-				IconLabel = new("ImageLabel", {
-					Parent = Row,
-					BackgroundTransparency = 1,
-					Position = UDim2.new(0, 12, 0.5, -9),
-					Size = UDim2.new(0, 18, 0, 18),
-					Image = iconResolved,
-					ScaleType = Enum.ScaleType.Fit,
-					ImageColor3 = Theme.Text
-				})
-				textX = 38
-				bind("text", IconLabel, "ImageColor3")
-			end
-
-			local Btn = new("TextButton", {
-				Parent = Row,
-				BackgroundTransparency = 1,
-				Size = UDim2.new(1, 0, 1, 0),
+				Size = UDim2.new(1, 0, 0, 36),
 				Text = text or "Button",
 				TextColor3 = Theme.Text,
 				Font = Enum.Font.GothamSemibold,
 				TextSize = 13,
-				AutoButtonColor = false,
-				TextXAlignment = Enum.TextXAlignment.Left
+				AutoButtonColor = false
 			})
-			Btn.TextXAlignment = Enum.TextXAlignment.Left
-			Btn.Position = UDim2.new(0, textX, 0, 0)
+			corner(Btn, 9)
+			local BtnStroke = stroke(Btn, Theme.Stroke, 1)
 
-			bind("button", Row, "BackgroundColor3")
-			bind("stroke", RowStroke, "Color")
-			bind("text", Btn, "TextColor3")
+			track("button", Btn, "BackgroundColor3")
+			track("text", Btn, "TextColor3")
+			track("stroke", BtnStroke, "Color")
 
 			Btn.MouseButton1Click:Connect(function()
 				if callback then
@@ -623,42 +544,38 @@ function Library:CreateWindow(cfg)
 			return Btn
 		end
 
-		function SectionApi:AddToggle(text, defaultValue, callback, icon)
+		function SectionApi:AddToggle(text, defaultValue, callback, iconId)
 			local state = defaultValue and true or false
 
-			local Row = new("TextButton", {
+			local Holder = new("TextButton", {
 				Parent = Body,
 				BackgroundColor3 = Theme.Button,
 				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 46),
+				Size = UDim2.new(1, 0, 0, 44),
 				Text = "",
 				AutoButtonColor = false
 			})
-			corner(Row, 9)
-			local RowStroke = stroke(Row, Theme.Stroke, 1)
+			corner(Holder, 10)
+			local HolderStroke = stroke(Holder, Theme.Stroke, 1)
 
-			local iconResolved = resolveIcon(icon)
-			local IconLabel
-			local textX = 12
-			if iconResolved ~= "" then
-				IconLabel = new("ImageLabel", {
-					Parent = Row,
+			local Icon
+			if iconId and iconId ~= "" then
+				Icon = new("ImageLabel", {
+					Parent = Holder,
 					BackgroundTransparency = 1,
-					Position = UDim2.new(0, 12, 0.5, -9),
+					Position = UDim2.new(0, 10, 0.5, -9),
 					Size = UDim2.new(0, 18, 0, 18),
-					Image = iconResolved,
-					ScaleType = Enum.ScaleType.Fit,
-					ImageColor3 = Theme.Text
+					Image = iconId,
+					ScaleType = Enum.ScaleType.Fit
 				})
-				textX = 38
-				bind("text", IconLabel, "ImageColor3")
+				track("text", Icon, "ImageColor3")
 			end
 
 			local Label = new("TextLabel", {
-				Parent = Row,
+				Parent = Holder,
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, textX, 0, 0),
-				Size = UDim2.new(1, -100, 1, 0),
+				Position = UDim2.new(0, Icon and 34 or 12, 0, 0),
+				Size = UDim2.new(1, -90, 1, 0),
 				Text = text or "Toggle",
 				TextColor3 = Theme.Text,
 				Font = Enum.Font.GothamSemibold,
@@ -667,11 +584,11 @@ function Library:CreateWindow(cfg)
 			})
 
 			local Switch = new("Frame", {
-				Parent = Row,
+				Parent = Holder,
 				BackgroundColor3 = state and Theme.Accent or Theme.Stroke,
 				BorderSizePixel = 0,
-				Size = UDim2.new(0, 48, 0, 24),
-				Position = UDim2.new(1, -60, 0.5, -12)
+				Size = UDim2.new(0, 44, 0, 22),
+				Position = UDim2.new(1, -56, 0.5, -11)
 			})
 			corner(Switch, 999)
 
@@ -679,31 +596,32 @@ function Library:CreateWindow(cfg)
 				Parent = Switch,
 				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 				BorderSizePixel = 0,
-				Size = UDim2.new(0, 18, 0, 18),
-				Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+				AnchorPoint = Vector2.new(0, 0),
+				Size = UDim2.new(0, 16, 0, 16),
+				Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
 			})
 			corner(Knob, 999)
 
-			bind("button", Row, "BackgroundColor3")
-			bind("stroke", RowStroke, "Color")
-			bind("text", Label, "TextColor3")
-			bind("fill", Switch, "BackgroundColor3")
+			track("button", Holder, "BackgroundColor3")
+			track("stroke", HolderStroke, "Color")
+			track("text", Label, "TextColor3")
+			track("fill", Switch, "BackgroundColor3")
 
 			local function render()
-				local goalPos = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
-				TweenService:Create(Knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Position = goalPos
-				}):Play()
-				TweenService:Create(Switch, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				playShow(Knob, {
+					Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+				}, 0.15)
+
+				playShow(Switch, {
 					BackgroundColor3 = state and Theme.Accent or Theme.Stroke
-				}):Play()
+				}, 0.15)
 
 				if callback then
 					task.spawn(callback, state)
 				end
 			end
 
-			Row.MouseButton1Click:Connect(function()
+			Holder.MouseButton1Click:Connect(function()
 				state = not state
 				render()
 			end)
@@ -723,7 +641,7 @@ function Library:CreateWindow(cfg)
 			return Toggle
 		end
 
-		function SectionApi:AddSlider(text, minValue, maxValue, defaultValue, callback)
+		function SectionApi:AddSlider(text, minValue, maxValue, defaultValue, callback, iconId)
 			minValue = minValue or 0
 			maxValue = maxValue or 100
 			defaultValue = defaultValue or minValue
@@ -731,20 +649,33 @@ function Library:CreateWindow(cfg)
 			local value = math.clamp(defaultValue, minValue, maxValue)
 			local dragging = false
 
-			local Row = new("Frame", {
+			local Holder = new("Frame", {
 				Parent = Body,
 				BackgroundColor3 = Theme.Button,
 				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 66)
+				Size = UDim2.new(1, 0, 0, 64)
 			})
-			corner(Row, 9)
-			local RowStroke = stroke(Row, Theme.Stroke, 1)
+			corner(Holder, 10)
+			local HolderStroke = stroke(Holder, Theme.Stroke, 1)
+
+			local Icon
+			if iconId and iconId ~= "" then
+				Icon = new("ImageLabel", {
+					Parent = Holder,
+					BackgroundTransparency = 1,
+					Position = UDim2.new(0, 10, 0, 8),
+					Size = UDim2.new(0, 16, 0, 16),
+					Image = iconId,
+					ScaleType = Enum.ScaleType.Fit
+				})
+				track("text", Icon, "ImageColor3")
+			end
 
 			local Label = new("TextLabel", {
-				Parent = Row,
+				Parent = Holder,
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, 10, 0, 7),
-				Size = UDim2.new(1, -20, 0, 16),
+				Position = UDim2.new(0, Icon and 34 or 12, 0, 6),
+				Size = UDim2.new(1, -90, 0, 18),
 				Text = text or "Slider",
 				TextColor3 = Theme.Text,
 				Font = Enum.Font.GothamSemibold,
@@ -753,10 +684,10 @@ function Library:CreateWindow(cfg)
 			})
 
 			local ValueLabel = new("TextLabel", {
-				Parent = Row,
+				Parent = Holder,
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, 10, 0, 7),
-				Size = UDim2.new(1, -20, 0, 16),
+				Position = UDim2.new(0, 10, 0, 6),
+				Size = UDim2.new(1, -20, 0, 18),
 				Text = tostring(value),
 				TextColor3 = Theme.SubText,
 				Font = Enum.Font.Gotham,
@@ -765,10 +696,10 @@ function Library:CreateWindow(cfg)
 			})
 
 			local Bar = new("Frame", {
-				Parent = Row,
+				Parent = Holder,
 				BackgroundColor3 = Theme.Input,
 				BorderSizePixel = 0,
-				Position = UDim2.new(0, 10, 0, 36),
+				Position = UDim2.new(0, 10, 0, 38),
 				Size = UDim2.new(1, -20, 0, 10)
 			})
 			corner(Bar, 999)
@@ -791,43 +722,34 @@ function Library:CreateWindow(cfg)
 			})
 			corner(Knob, 999)
 
-			bind("button", Row, "BackgroundColor3")
-			bind("stroke", RowStroke, "Color")
-			bind("input", Bar, "BackgroundColor3")
-			bind("fill", Fill, "BackgroundColor3")
-			bind("text", Label, "TextColor3")
-			bind("sub", ValueLabel, "TextColor3")
+			track("button", Holder, "BackgroundColor3")
+			track("stroke", HolderStroke, "Color")
+			track("input", Bar, "BackgroundColor3")
+			track("fill", Fill, "BackgroundColor3")
+			track("text", Label, "TextColor3")
+			track("sub", ValueLabel, "TextColor3")
 
-			local function applyValue(v, tween)
-				v = math.clamp(v, minValue, maxValue)
-				value = v
+			local function setFromAlpha(alpha, fireCallback)
+				alpha = math.clamp(alpha, 0, 1)
+				value = math.floor((minValue + (maxValue - minValue) * alpha) + 0.5)
 				ValueLabel.Text = tostring(value)
 
-				local alpha = 0
-				if maxValue ~= minValue then
-					alpha = (value - minValue) / (maxValue - minValue)
-				end
+				TweenService:Create(Fill, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Size = UDim2.new(alpha, 0, 1, 0)
+				}):Play()
 
-				local fillGoal = { Size = UDim2.new(alpha, 0, 1, 0) }
-				local knobGoal = { Position = UDim2.new(alpha, 0, 0.5, 0) }
+				TweenService:Create(Knob, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Position = UDim2.new(alpha, 0, 0.5, 0)
+				}):Play()
 
-				if tween then
-					TweenService:Create(Fill, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), fillGoal):Play()
-					TweenService:Create(Knob, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), knobGoal):Play()
-				else
-					Fill.Size = fillGoal.Size
-					Knob.Position = knobGoal.Position
-				end
-
-				if callback then
+				if fireCallback and callback then
 					task.spawn(callback, value)
 				end
 			end
 
 			local function updateFromInput(inputPos)
 				local x = math.clamp((inputPos.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
-				local newValue = math.floor((minValue + (maxValue - minValue) * x) + 0.5)
-				applyValue(newValue, true)
+				setFromAlpha(x, true)
 			end
 
 			Bar.InputBegan:Connect(function(input)
@@ -837,7 +759,14 @@ function Library:CreateWindow(cfg)
 				end
 			end)
 
-			Bar.InputChanged:Connect(function(input)
+			Knob.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					dragging = true
+					updateFromInput(input.Position)
+				end
+			end)
+
+			UIS.InputChanged:Connect(function(input)
 				if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 					updateFromInput(input.Position)
 				end
@@ -852,18 +781,20 @@ function Library:CreateWindow(cfg)
 			local Slider = {}
 
 			function Slider:Set(v)
-				applyValue(v, true)
+				v = math.clamp(v, minValue, maxValue)
+				local alpha = (v - minValue) / (maxValue - minValue)
+				setFromAlpha(alpha, true)
 			end
 
 			function Slider:Get()
 				return value
 			end
 
-			applyValue(value, false)
+			Slider:Set(value)
 			return Slider
 		end
 
-		function SectionApi:AddDropdown(text, options, callback, icon)
+		function SectionApi:AddDropdown(text, options, callback, iconId)
 			options = options or {}
 			local opened = false
 			local selected = nil
@@ -872,41 +803,38 @@ function Library:CreateWindow(cfg)
 				Parent = Body,
 				BackgroundColor3 = Theme.Button,
 				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 40)
+				Size = UDim2.new(1, 0, 0, 36),
+				ClipsDescendants = true
 			})
-			corner(Holder, 9)
+			corner(Holder, 10)
 			local HolderStroke = stroke(Holder, Theme.Stroke, 1)
-
-			local iconResolved = resolveIcon(icon)
-			local IconLabel
-			local textX = 12
-			if iconResolved ~= "" then
-				IconLabel = new("ImageLabel", {
-					Parent = Holder,
-					BackgroundTransparency = 1,
-					Position = UDim2.new(0, 12, 0.5, -9),
-					Size = UDim2.new(0, 18, 0, 18),
-					Image = iconResolved,
-					ScaleType = Enum.ScaleType.Fit,
-					ImageColor3 = Theme.Text
-				})
-				textX = 38
-				bind("text", IconLabel, "ImageColor3")
-			end
 
 			local MainButton = new("TextButton", {
 				Parent = Holder,
 				BackgroundTransparency = 1,
-				Size = UDim2.new(1, 0, 0, 40),
+				Size = UDim2.new(1, 0, 0, 36),
 				Text = "",
 				AutoButtonColor = false
 			})
 
+			local Icon
+			if iconId and iconId ~= "" then
+				Icon = new("ImageLabel", {
+					Parent = Holder,
+					BackgroundTransparency = 1,
+					Position = UDim2.new(0, 10, 0.5, -8),
+					Size = UDim2.new(0, 16, 0, 16),
+					Image = iconId,
+					ScaleType = Enum.ScaleType.Fit
+				})
+				track("text", Icon, "ImageColor3")
+			end
+
 			local Label = new("TextLabel", {
 				Parent = Holder,
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, textX, 0, 0),
-				Size = UDim2.new(1, -50, 1, 0),
+				Position = UDim2.new(0, Icon and 34 or 12, 0, 0),
+				Size = UDim2.new(1, -46, 1, 0),
 				Text = text or "Dropdown",
 				TextColor3 = Theme.Text,
 				Font = Enum.Font.GothamSemibold,
@@ -917,7 +845,7 @@ function Library:CreateWindow(cfg)
 			local Arrow = new("TextLabel", {
 				Parent = Holder,
 				BackgroundTransparency = 1,
-				Position = UDim2.new(1, -26, 0, 0),
+				Position = UDim2.new(1, -24, 0, 0),
 				Size = UDim2.new(0, 14, 1, 0),
 				Text = "▼",
 				TextColor3 = Theme.SubText,
@@ -929,7 +857,7 @@ function Library:CreateWindow(cfg)
 				Parent = Holder,
 				BackgroundColor3 = Theme.Card,
 				BorderSizePixel = 0,
-				Position = UDim2.new(0, 0, 0, 44),
+				Position = UDim2.new(0, 0, 0, 38),
 				Size = UDim2.new(1, 0, 0, 0),
 				ClipsDescendants = true,
 				Visible = false
@@ -950,13 +878,6 @@ function Library:CreateWindow(cfg)
 				PaddingLeft = UDim.new(0, 6),
 				PaddingRight = UDim.new(0, 6)
 			})
-
-			bind("button", Holder, "BackgroundColor3")
-			bind("stroke", HolderStroke, "Color")
-			bind("text", Label, "TextColor3")
-			bind("sub", Arrow, "TextColor3")
-			bind("card", List, "BackgroundColor3")
-			bind("stroke", ListStroke, "Color")
 
 			local function refreshList()
 				for _, child in ipairs(List:GetChildren()) do
@@ -980,16 +901,16 @@ function Library:CreateWindow(cfg)
 					corner(Item, 7)
 					local ItemStroke = stroke(Item, Theme.Stroke, 1)
 
-					bind("input", Item, "BackgroundColor3")
-					bind("text", Item, "TextColor3")
-					bind("stroke", ItemStroke, "Color")
+					track("input", Item, "BackgroundColor3")
+					track("text", Item, "TextColor3")
+					track("stroke", ItemStroke, "Color")
 
 					Item.MouseButton1Click:Connect(function()
 						selected = tostring(opt)
 						Label.Text = (text or "Dropdown") .. " : " .. selected
 						opened = false
 						List.Visible = false
-						Holder.Size = UDim2.new(1, 0, 0, 40)
+						Holder.Size = UDim2.new(1, 0, 0, 36)
 						Arrow.Text = "▼"
 						if callback then
 							task.spawn(callback, selected)
@@ -997,14 +918,23 @@ function Library:CreateWindow(cfg)
 					end)
 				end
 
-				List.Size = UDim2.new(1, 0, 0, math.min(200, 12 + (#options * 38)))
+				local count = #options
+				local listHeight = math.min(200, 12 + (count * 38))
+				List.Size = UDim2.new(1, 0, 0, listHeight)
 			end
+
+			track("button", Holder, "BackgroundColor3")
+			track("stroke", HolderStroke, "Color")
+			track("text", Label, "TextColor3")
+			track("sub", Arrow, "TextColor3")
+			track("card", List, "BackgroundColor3")
+			track("stroke", ListStroke, "Color")
 
 			MainButton.MouseButton1Click:Connect(function()
 				opened = not opened
 				List.Visible = opened
 				Arrow.Text = opened and "▲" or "▼"
-				Holder.Size = opened and UDim2.new(1, 0, 0, 44 + List.Size.Y.Offset) or UDim2.new(1, 0, 0, 40)
+				Holder.Size = opened and UDim2.new(1, 0, 0, 42 + List.Size.Y.Offset) or UDim2.new(1, 0, 0, 36)
 			end)
 
 			refreshList()
@@ -1035,8 +965,6 @@ function Library:CreateWindow(cfg)
 	end
 
 	local function makeTab(name, iconId)
-		local resolvedIcon = resolveIcon(iconId)
-
 		local TabButton = new("TextButton", {
 			Parent = TabList,
 			BackgroundColor3 = Theme.Button,
@@ -1045,30 +973,24 @@ function Library:CreateWindow(cfg)
 			Text = "",
 			AutoButtonColor = false
 		})
-		corner(TabButton, 8)
+		corner(TabButton, 10)
 		local TabStroke = stroke(TabButton, Theme.Stroke, 1)
 
-		local IconLabel
-		local textX = 12
-		if resolvedIcon ~= "" then
-			IconLabel = new("ImageLabel", {
-				Parent = TabButton,
-				BackgroundTransparency = 1,
-				Position = UDim2.new(0, 10, 0.5, -8),
-				Size = UDim2.new(0, 16, 0, 16),
-				Image = resolvedIcon,
-				ScaleType = Enum.ScaleType.Fit,
-				ImageColor3 = Theme.Text
-			})
-			textX = 34
-			bind("text", IconLabel, "ImageColor3")
-		end
-
-		local TabText = new("TextLabel", {
+		local Icon = new("ImageLabel", {
 			Parent = TabButton,
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0, textX, 0, 0),
-			Size = UDim2.new(1, -textX - 10, 1, 0),
+			Position = UDim2.new(0, 10, 0.5, -8),
+			Size = UDim2.new(0, 16, 0, 16),
+			Image = iconId or "",
+			Visible = iconId and iconId ~= "",
+			ScaleType = Enum.ScaleType.Fit
+		})
+
+		local Label = new("TextLabel", {
+			Parent = TabButton,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 34, 0, 0),
+			Size = UDim2.new(1, -40, 1, 0),
 			Text = name,
 			TextColor3 = Theme.Text,
 			Font = Enum.Font.GothamSemibold,
@@ -1087,7 +1009,7 @@ function Library:CreateWindow(cfg)
 			AutomaticCanvasSize = Enum.AutomaticSize.Y
 		})
 
-		local PageLayout = new("UIListLayout", {
+		new("UIListLayout", {
 			Parent = TabPage,
 			Padding = UDim.new(0, 10),
 			SortOrder = Enum.SortOrder.LayoutOrder
@@ -1101,16 +1023,16 @@ function Library:CreateWindow(cfg)
 			PaddingBottom = UDim.new(0, 10)
 		})
 
-		bind("button", TabButton, "BackgroundColor3")
-		bind("text", TabText, "TextColor3")
-		bind("stroke", TabStroke, "Color")
+		track("button", TabButton, "BackgroundColor3")
+		track("text", Label, "TextColor3")
+		track("stroke", TabStroke, "Color")
 
 		local TabData = {
 			Active = false,
 			Button = TabButton,
 			Page = TabPage,
 			ButtonStroke = TabStroke,
-			Icon = IconLabel,
+			Icon = Icon,
 			MainSection = nil
 		}
 
@@ -1125,7 +1047,6 @@ function Library:CreateWindow(cfg)
 				t.SetActive(false)
 			end
 			setActive(true)
-			Window._selectedTab = TabData
 		end)
 
 		function TabData.SetActive(state)
@@ -1134,28 +1055,28 @@ function Library:CreateWindow(cfg)
 
 		TabData.MainSection = makeSection(TabPage, "Main")
 
-		function TabData:AddSection(sectionTitle, sectionIcon)
-			return makeSection(TabPage, sectionTitle, sectionIcon)
+		function TabData:AddSection(sectionTitle)
+			return makeSection(TabPage, sectionTitle)
 		end
 
 		function TabData:AddLabel(text)
 			return TabData.MainSection:AddLabel(text)
 		end
 
-		function TabData:AddButton(text, callback, icon)
-			return TabData.MainSection:AddButton(text, callback, icon)
+		function TabData:AddButton(text, callback)
+			return TabData.MainSection:AddButton(text, callback)
 		end
 
-		function TabData:AddToggle(text, defaultValue, callback, icon)
-			return TabData.MainSection:AddToggle(text, defaultValue, callback, icon)
+		function TabData:AddToggle(text, defaultValue, callback, iconId)
+			return TabData.MainSection:AddToggle(text, defaultValue, callback, iconId)
 		end
 
-		function TabData:AddSlider(text, minValue, maxValue, defaultValue, callback)
-			return TabData.MainSection:AddSlider(text, minValue, maxValue, defaultValue, callback)
+		function TabData:AddSlider(text, minValue, maxValue, defaultValue, callback, iconId)
+			return TabData.MainSection:AddSlider(text, minValue, maxValue, defaultValue, callback, iconId)
 		end
 
-		function TabData:AddDropdown(text, options, callback, icon)
-			return TabData.MainSection:AddDropdown(text, options, callback, icon)
+		function TabData:AddDropdown(text, options, callback, iconId)
+			return TabData.MainSection:AddDropdown(text, options, callback, iconId)
 		end
 
 		Window._tabs[name] = TabData
@@ -1166,8 +1087,8 @@ function Library:CreateWindow(cfg)
 		Title.Text = text or ""
 	end
 
-	function Window:SetTheme(name)
-		local t = Themes[name]
+	function Window:SetTheme(themeName)
+		local t = Themes[themeName]
 		if not t then return end
 		applyTheme(t)
 	end
@@ -1212,60 +1133,94 @@ function Library:CreateWindow(cfg)
 		end
 	end
 
-	function Window:Notify(text, duration)
-		duration = duration or 3
+	function Window:Notify(opts)
+		if typeof(opts) == "string" then
+			opts = { Text = opts }
+		end
+		opts = opts or {}
+
+		local text = opts.Text or "Notify"
+		local icon = opts.Icon or ""
+		local duration = opts.Duration or 3
+		local timeText = opts.TimeText or os.date("%H:%M")
 
 		local Holder = new("Frame", {
 			Parent = NotifyHolder,
 			BackgroundColor3 = Theme.Card,
 			BorderSizePixel = 0,
-			Size = UDim2.new(0, 260, 0, 50),
-			Position = UDim2.new(1, 280, 1, -70)
+			Size = UDim2.new(0, 280, 0, 56),
+			Position = UDim2.new(1, 300, 1, -76)
 		})
 		corner(Holder, 10)
 		local HolderStroke = stroke(Holder, Theme.Stroke, 1)
 
-		local TitleLabel = new("TextLabel", {
+		local IconLabel = new("ImageLabel", {
 			Parent = Holder,
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0, 12, 0, 0),
-			Size = UDim2.new(1, -24, 1, 0),
-			Text = text or "Notify",
+			Position = UDim2.new(0, 12, 0.5, -10),
+			Size = UDim2.new(0, 20, 0, 20),
+			Image = icon,
+			Visible = icon ~= "",
+			ScaleType = Enum.ScaleType.Fit
+		})
+
+		local TextLabel = new("TextLabel", {
+			Parent = Holder,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, icon ~= "" and 40 or 12, 0, 0),
+			Size = UDim2.new(1, icon ~= "" and -96 or -68, 1, 0),
+			Text = text,
 			TextColor3 = Theme.Text,
 			Font = Enum.Font.GothamSemibold,
 			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
 			TextWrapped = true
 		})
 
+		local TimeLabel = new("TextLabel", {
+			Parent = Holder,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(1, -58, 0, 0),
+			Size = UDim2.new(0, 46, 0, 20),
+			Text = timeText,
+			TextColor3 = Theme.SubText,
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Right
+		})
+
 		Holder.BackgroundTransparency = 1
-		TitleLabel.TextTransparency = 1
+		TextLabel.TextTransparency = 1
+		TimeLabel.TextTransparency = 1
+		if IconLabel.Visible then
+			IconLabel.ImageTransparency = 1
+		end
 		HolderStroke.Transparency = 1
 
-		TweenService:Create(Holder, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		playShow(Holder, {
 			BackgroundTransparency = 0,
-			Position = UDim2.new(1, -280, 1, -70)
-		}):Play()
+			Position = UDim2.new(1, -300, 1, -76)
+		}, 0.18)
 
-		TweenService:Create(TitleLabel, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			TextTransparency = 0
-		}):Play()
-
-		TweenService:Create(HolderStroke, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Transparency = 0
-		}):Play()
+		playShow(TextLabel, { TextTransparency = 0 }, 0.18)
+		playShow(TimeLabel, { TextTransparency = 0 }, 0.18)
+		playShow(HolderStroke, { Transparency = 0 }, 0.18)
+		if IconLabel.Visible then
+			playShow(IconLabel, { ImageTransparency = 0 }, 0.18)
+		end
 
 		task.delay(duration, function()
 			if Holder and Holder.Parent then
-				TweenService:Create(Holder, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				playShow(Holder, {
 					BackgroundTransparency = 1,
-					Position = UDim2.new(1, 280, 1, -70)
-				}):Play()
-				TweenService:Create(TitleLabel, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					TextTransparency = 1
-				}):Play()
-				TweenService:Create(HolderStroke, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Transparency = 1
-				}):Play()
+					Position = UDim2.new(1, 300, 1, -76)
+				}, 0.18)
+				playShow(TextLabel, { TextTransparency = 1 }, 0.12)
+				playShow(TimeLabel, { TextTransparency = 1 }, 0.12)
+				playShow(HolderStroke, { Transparency = 1 }, 0.12)
+				if IconLabel.Visible then
+					playShow(IconLabel, { ImageTransparency = 1 }, 0.12)
+				end
 				task.wait(0.2)
 				if Holder then
 					Holder:Destroy()
@@ -1278,10 +1233,8 @@ function Library:CreateWindow(cfg)
 		for _, tab in pairs(Window._tabs) do
 			tab.SetActive(false)
 		end
-
 		for _, tab in pairs(Window._tabs) do
 			tab.SetActive(true)
-			Window._selectedTab = tab
 			break
 		end
 	end
@@ -1298,17 +1251,15 @@ function Library:CreateWindow(cfg)
 		Window:SetDiscord(cfg.DiscordBannerImage, cfg.DiscordLink, cfg.DiscordText, cfg.DiscordSubText)
 	end
 
-	if cfg.DefaultTabs and typeof(cfg.DefaultTabs) == "table" then
-		for _, tabName in ipairs(cfg.DefaultTabs) do
-			makeTab(tostring(tabName))
-		end
-	end
-
 	Window.AddTab = function(_, tabName, iconId)
 		return makeTab(tabName, iconId)
 	end
 
-	Window.ResolveIcon = resolveIcon
+	if cfg.DefaultTabs and typeof(cfg.DefaultTabs) == "table" then
+		for _, tabName in ipairs(cfg.DefaultTabs) do
+			makeTab(tostring(tabName), "")
+		end
+	end
 
 	return Window
 end
